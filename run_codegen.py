@@ -12,7 +12,8 @@ def main(args):
     for filename in os.listdir(fn_dir):
         f = os.path.join(fn_dir, filename)
         if os.path.isfile(f) and f.endswith(".casadi"):
-            if args.fn_name == "all" or args.fn_name in f:
+            stem, _ = os.path.splitext(filename)
+            if args.fn_name == "all" or args.fn_name == stem:
                 print("CasADi function found: ", f)
                 casadi_fns.append(casadi.Function.load(f))
     for f in casadi_fns:
