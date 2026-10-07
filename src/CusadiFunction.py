@@ -1,3 +1,4 @@
+import os
 import torch
 import ctypes
 from casadi import *
@@ -23,6 +24,7 @@ class CusadiFunction:
     _fn_input = []
     _fn_work = []
     _fn_output = []
+    _clear_tensors = os.environ.get("CUSADI_CLEAR_TENSORS", "0") == "1"
 
     # ! Public methods:
     def __init__(self, fn_casadi, num_instances):
@@ -102,11 +104,14 @@ class CusadiFunction:
         self.inputs_sparse = self._input_tensors
 
     def _clearTensors(self):
-        # for i in range(self.fn_casadi.n_in()):
-        #     self._input_tensors[i].zero_()
-        for i in range(self.fn_casadi.n_out()):
-            self._output_tensors[i].zero_()
-        self._work_tensor.zero_()
+        # Redundant: the generated kernel writes every work slot before reading it
+        # and emits an OP_OUTPUT for every output nonzero, so both buffers are fully
+        # overwritten on each call. Zeroing them memset ~446 MB per call for the
+        # largest stage function. Set CUSADI_CLEAR_TENSORS=1 to restore.
+        if self._clear_tensors:
+            for i in range(self.fn_casadi.n_out()):
+                self._output_tensors[i].zero_()
+            self._work_tensor.zero_()
 
     def _castAsCPointer(self, ptr, type='float'):
         if type == 'int':

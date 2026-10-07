@@ -58,7 +58,7 @@ def generateCMakeLists(casadi_fns):
     for cmake_str in cmake_strings.values():
         cmake_file.write(cmake_str)
 
-def generateCUDACodeDouble(f, filepath=None, benchmarking=True, debug_mode=True):
+def generateCUDACodeDouble(f, filepath=None, benchmarking=False, debug_mode=False):
     print("Generating CUDA code for CasADi function: ", f.name())
     if filepath is None:
         codegen_filepath = os.path.join(CUSADI_ROOT_DIR, "codegen", f"{f.name()}.cu")
@@ -154,27 +154,47 @@ def generateCUDACodeDouble(f, filepath=None, benchmarking=True, debug_mode=True)
 
     # * Codegen for C interface
     codegen_strings['c_interface_header'] = """\n\nextern "C" {\n"""
-    codegen_strings['c_evaluation'] = textwrap.dedent(
-    '''
-        float evaluate(const double *inputs[],
-                    double *work,
-                    double *outputs[],
-                    const int batch_size) {
-            int blockSize = 256;
-            int gridSize = (batch_size + blockSize - 1) / blockSize;
-            float milliseconds;
-            cudaEvent_t start, stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
-            cudaEventRecord(start, 0);
-            evaluate_kernel<<<gridSize, blockSize>>>(inputs,
-                                                    work,
-                                                    outputs,
-                                                    batch_size);
-            cudaEventRecord(stop, 0);
-            cudaEventSynchronize(stop);
-            cudaEventElapsedTime(&milliseconds, start, stop);
-    ''')
+    if benchmarking:
+        codegen_strings['c_evaluation'] = textwrap.dedent(
+        '''
+            float evaluate(const double *inputs[],
+                        double *work,
+                        double *outputs[],
+                        const int batch_size) {
+                int blockSize = 256;
+                int gridSize = (batch_size + blockSize - 1) / blockSize;
+                float milliseconds;
+                cudaEvent_t start, stop;
+                cudaEventCreate(&start);
+                cudaEventCreate(&stop);
+                cudaEventRecord(start, 0);
+                evaluate_kernel<<<gridSize, blockSize>>>(inputs,
+                                                        work,
+                                                        outputs,
+                                                        batch_size);
+                cudaEventRecord(stop, 0);
+                cudaEventSynchronize(stop);
+                cudaEventElapsedTime(&milliseconds, start, stop);
+                cudaEventDestroy(start);
+                cudaEventDestroy(stop);
+        ''')
+    else:
+        # Async launch: no timing events, no host sync. Lets the caller queue work
+        # ahead of the kernel instead of draining the stream on every call.
+        codegen_strings['c_evaluation'] = textwrap.dedent(
+        '''
+            float evaluate(const double *inputs[],
+                        double *work,
+                        double *outputs[],
+                        const int batch_size) {
+                int blockSize = 256;
+                int gridSize = (batch_size + blockSize - 1) / blockSize;
+                float milliseconds = 0.f;
+                evaluate_kernel<<<gridSize, blockSize>>>(inputs,
+                                                        work,
+                                                        outputs,
+                                                        batch_size);
+        ''')
     if debug_mode:
         codegen_strings['c_evaluation'] += "\n    gpuErrchk(cudaPeekAtLastError());"
         codegen_strings['c_evaluation'] += "\n    gpuErrchk(cudaDeviceSynchronize());"
